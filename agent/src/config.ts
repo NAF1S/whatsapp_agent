@@ -79,5 +79,9 @@ export const config = {
     appSecret: process.env.MESSENGER_APP_SECRET || '',
     verifyToken: process.env.MESSENGER_VERIFY_TOKEN || '',
     graphVersion: process.env.MESSENGER_GRAPH_VERSION || 'v26.0',
+    // Operational kill switch: MESSENGER_ENQUEUE=false stops the bot replying on Messenger
+    // without a code change or restart of the WhatsApp path. Also lets the webhook test
+    // harness mount the router without injecting fake jobs into the live queue.
+    enqueueEnabled: (process.env.MESSENGER_ENQUEUE || 'true').toLowerCase() !== 'false',
   },
 };

@@ -5,12 +5,14 @@ import axios from 'axios';
 import { config } from './config';
 import { logger } from './utils/logger';
 import { checkDbConnection, query } from './data/db';
-import { startQueueWorker, sendWhatsAppMessage } from './queue/worker';
+import { startQueueWorker } from './queue/worker';
+import { sendMessage } from './channels/dispatch';
 import { sessionManager } from './session/manager';
 import { ragIndexer } from './rag/indexer';
 import { settingsService } from './data/settings';
 import { escalationNotifier } from './escalation/notifier';
 import { messengerWebhookRouter } from './channels/messenger/webhook';
+import { normalizeCustomerId } from './channels/messenger/identity';
 
 const app = express();
 app.use(cors());
@@ -152,7 +154,13 @@ app.get('/api/admin/conversations', requireAdminAuth, async (req, res) => {
 });
 
 app.get('/api/admin/conversation/:phone', requireAdminAuth, async (req, res) => {
-  const phone = req.params.phone;
+  // Canonicalise the lookup key. An admin whose dashboard still holds a pre-merge key
+  // (e.g. "+8801892740307") would otherwise get a 200 with an empty thread — the session and
+  // its history live under the canonical key after the merge, not under the old one.
+  const phone = normalizeCustomerId(String(req.params.phone));
+  if (!phone) {
+    return res.status(400).json({ error: 'Invalid phone' });
+  }
 
   try {
     const sessionRes = await query<any>('SELECT * FROM sessions WHERE phone = $1', [phone]);
@@ -171,16 +179,19 @@ app.get('/api/admin/conversation/:phone', requireAdminAuth, async (req, res) => 
 });
 
 app.post('/api/admin/reply', requireAdminAuth, async (req, res) => {
-  const { phone, text } = req.body;
+  const { phone: rawPhone, text } = req.body;
+  const phone = normalizeCustomerId(String(rawPhone || ''));
   if (!phone || !text) {
     return res.status(400).json({ error: 'Missing phone or text' });
   }
 
   try {
-    // 1. Send message to WhatsApp via Baileys bridge
-    const sent = await sendWhatsAppMessage(phone, text);
+    // 1. Send on whichever channel this conversation belongs to. `phone` is the session key,
+    //    so a Messenger thread ("fb:<psid>") routes to the Graph API and a WhatsApp thread to
+    //    the Baileys bridge — the admin does not need to know the difference.
+    const sent = await sendMessage(phone, text);
     if (!sent) {
-      return res.status(502).json({ error: 'Failed to send message via WhatsApp gateway' });
+      return res.status(502).json({ error: 'Failed to send message on this channel' });
     }
 
     // 2. Persist message with role 'human'
@@ -197,7 +208,7 @@ app.post('/api/admin/reply', requireAdminAuth, async (req, res) => {
 });
 
 app.post('/api/admin/close-ticket', requireAdminAuth, async (req, res) => {
-  const { phone } = req.body;
+  const phone = normalizeCustomerId(String(req.body?.phone || ''));
   if (!phone) return res.status(400).json({ error: 'Missing phone' });
 
   try {
@@ -209,7 +220,7 @@ app.post('/api/admin/close-ticket', requireAdminAuth, async (req, res) => {
 });
 
 app.post('/api/admin/lock-ticket', requireAdminAuth, async (req, res) => {
-  const { phone } = req.body;
+  const phone = normalizeCustomerId(String(req.body?.phone || ''));
   if (!phone) return res.status(400).json({ error: 'Missing phone' });
 
   try {

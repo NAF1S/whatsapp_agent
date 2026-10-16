@@ -1,10 +1,11 @@
 import { Worker, Job } from 'bullmq';
-import axios from 'axios';
 import { multimodalPreprocessor, IncomingRawPayload } from '../preprocessor';
 import { agentBrain } from '../brain/agent';
 import { sessionManager } from '../session/manager';
 import { config } from '../config';
 import { logger } from '../utils/logger';
+import { normalizeCustomerId } from '../channels/messenger/identity';
+import { sendMessage, channelOf } from '../channels/dispatch';
 
 // Per-customer sequential mutex to avoid race conditions and parallel replies
 const customerLocks = new Map<string, Promise<void>>();
@@ -23,9 +24,12 @@ export function startQueueWorker(): Worker {
     async (job: Job<IncomingRawPayload>) => {
       const start = Date.now();
       const { sessionId, senderPhone, messageType, isBotPaused } = job.data;
-      logger.info({ jobId: job.id, senderPhone, messageType, isBotPaused: !!isBotPaused }, 'Processing incoming WhatsApp job');
+      logger.info({ jobId: job.id, senderPhone, messageType, isBotPaused: !!isBotPaused }, 'Processing inbound message job');
 
-      const phoneKey = senderPhone.replace(/[^\d+]/g, '');
+      // Channel-aware key. A plain strip of non-digits would reduce a Messenger PSID to a
+      // bare 15-17 digit string, which can collide with a real customer's phone number —
+      // two different people sharing one session, one lock, and one conversation history.
+      const phoneKey = normalizeCustomerId(senderPhone);
       const previousLock = customerLocks.get(phoneKey) || Promise.resolve();
 
       let releaseLock: () => void = () => {};
@@ -71,16 +75,18 @@ export function startQueueWorker(): Worker {
         // 3. Process through agent brain (session check, tool execution, LLM synthesis)
         const reply = await agentBrain.processCustomerMessage(senderPhone, normalizedText, sessionId);
 
-        // 4. If a reply was produced (i.e. session was not human-locked), send via WhatsApp bridge
+        // 4. If a reply was produced (i.e. session was not human-locked), send it back on
+        // whichever channel the message arrived from — decided from `sessionId`.
         if (reply) {
-          logger.info({ senderPhone, replyLength: reply.length }, 'Sending reply via WhatsApp bridge');
-          await sendWhatsAppMessage(sessionId, reply);
+          const channel = channelOf(sessionId);
+          logger.info({ senderPhone, channel, replyLength: reply.length }, 'Sending reply to customer');
+          await sendMessage(sessionId, reply);
         } else {
           logger.info({ senderPhone }, 'No automated reply sent (session in human control)');
         }
 
         const duration = Date.now() - start;
-        logger.info({ jobId: job.id, senderPhone, durationMs: duration }, 'Completed WhatsApp message job');
+        logger.info({ jobId: job.id, senderPhone, durationMs: duration }, 'Completed message job');
       } catch (err: any) {
         logger.error({ err: err.message, jobId: job.id, senderPhone }, 'Error in queue worker job');
         throw err;
@@ -111,20 +117,8 @@ export function startQueueWorker(): Worker {
   return worker;
 }
 
-/**
- * Send outbound WhatsApp message via the Baileys bridge API
- */
-export async function sendWhatsAppMessage(toJid: string, text: string): Promise<boolean> {
-  const bridgeUrl = `${config.whatsapp.bridgeUrl}/send`;
-  try {
-    const res = await axios.post(
-      bridgeUrl,
-      { to: toJid, text },
-      { timeout: 15000 }
-    );
-    return res.data?.success === true;
-  } catch (err: any) {
-    logger.error({ err: err.message, to: toJid, bridgeUrl }, 'Failed to send message via WhatsApp bridge');
-    return false;
-  }
-}
+// The WhatsApp send implementation moved to channels/whatsapp/send.ts so that
+// channels/dispatch.ts can use it without a circular import (worker → dispatch → worker).
+// Re-exported here unchanged so the existing importers — the admin reply route in index.ts
+// and the escalation notifier — need no modification at all.
+export { sendWhatsAppMessage } from '../channels/whatsapp/send';

@@ -1,11 +1,10 @@
-import axios from 'axios';
 import { ragRetriever } from '../rag/retriever';
 import { wooClient } from '../data/woo-client';
 import { sessionManager } from '../session/manager';
 import { escalationNotifier } from '../escalation/notifier';
 import { query } from '../data/db';
-import { config } from '../config';
 import { logger } from '../utils/logger';
+import { sendImage } from '../channels/dispatch';
 
 export const TOOL_DECLARATIONS = [
   {
@@ -278,29 +277,22 @@ export async function executeTool(
         };
       }
 
-      const bridgeUrl = `${config.whatsapp.bridgeUrl}/send-image`;
       let sentCount = 0;
 
       for (let i = 0; i < sendQueue.length; i++) {
         const item = sendQueue[i];
         try {
-          const resp = await axios.post(
-            bridgeUrl,
-            {
-              to: recipient,
-              imageUrl: item.url,
-              caption: item.caption,
-            },
-            { timeout: 15000 }
-          );
-          if (resp.data?.success) {
+          // Routed by recipient: `fb:<psid>` goes to the Messenger Graph API, a WhatsApp JID
+          // to the Baileys bridge. See channels/dispatch.ts.
+          const ok = await sendImage(recipient, item.url, item.caption);
+          if (ok) {
             sentCount++;
           }
           if (i < sendQueue.length - 1) {
             await new Promise((r) => setTimeout(r, 600));
           }
         } catch (err: any) {
-          logger.error({ err: err.message, imgUrl: item.url, recipient }, 'Failed to send product image via bridge');
+          logger.error({ err: err.message, imgUrl: item.url, recipient }, 'Failed to send product image');
         }
       }
 
@@ -308,7 +300,7 @@ export async function executeTool(
         success: sentCount > 0,
         sent_count: sentCount,
         message: sentCount > 0
-          ? `Successfully sent ${sentCount} official product photo(s) directly to the customer on WhatsApp. In your text message, tell the customer that the photos have been sent directly above and ask if they like the product or would like to order. DO NOT send URLs or markdown image links in your text.`
+          ? `Successfully sent ${sentCount} official product photo(s) directly to the customer. In your text message, tell the customer that the photos have been sent directly above and ask if they like the product or would like to order. DO NOT send URLs or markdown image links in your text.`
           : 'Could not deliver images at this moment due to a connection issue. DO NOT send URLs or broken links in your text. Reassure the customer politely and offer to answer their questions or help them place an order.',
       };
     }
@@ -607,7 +599,10 @@ export async function executeTool(
         ],
         // Applied by code so the discount is on the order the courier collects against.
         ...(appliedCoupon ? { coupon_lines: [{ code: appliedCoupon }] } : {}),
-        customer_note: `Order placed via Hide Haven WhatsApp AI Assistant for ${customerPhone}`,
+        // `customerPhoneInput` (what the customer typed) rather than `customerPhone` (the
+        // session identity): for a Messenger customer the identity is "fb:<psid>", which has
+        // no business being stamped into a WooCommerce order.
+        customer_note: `Order placed via Hide Haven AI Assistant for ${customerPhoneInput}`,
       };
 
       // 3. Create live order in WooCommerce. A missing id means the order does NOT exist:
