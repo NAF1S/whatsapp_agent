@@ -102,11 +102,17 @@ is no testsuite for the live TypeScript agent (existing tests target the dead Py
 ## 5. Environment
 
 - Alpine Linux inside a **chroot**. `/sbin/openrc` **does not exist**, so `/etc/inittab`'s
-  `openrc` lines are no-ops. Boot is driven by a **host-side script outside the chroot**
-  (keeps cloudflare/ssh/pm2 up) — it cannot be edited from in here.
-- ⚠️ **Add this line to that host boot script**: `/bin/sh /projects/HH-agent/scripts/boot-services.sh`
-  It is currently unknown whether Redis starts at boot at all; before 2026-10-15 it was
-  started **by hand**, and would have been missing after any reboot (bot silently dead).
+  `openrc` lines are no-ops. Boot is driven by the Android-side step
+  `chroot <root> /bin/sh /usr/local/bin/alpine-services.sh` — that script lives **inside this
+  chroot and is editable from in here**. It starts ttyd, cloudflared and `pm2 resurrect`
+  (which is how the two agent apps come back), and sets PATH/HOME explicitly because the boot
+  invocation supplies neither. `pm2 startup` cannot be used: PID 1 is Android's init.
+- Since 2026-10-16 it also calls, at the end:
+  `sh /projects/HH-agent/scripts/boot-services.sh` — that brings up **Redis and crond**, which
+  nothing else starts, and re-verifies the apps. It runs *after* `pm2 resurrect` because it
+  issues pm2 commands and inspects those apps. Before this, both Redis and crond were started
+  **by hand** and would have been missing after any reboot (bot silently dead; nightly backups
+  silently not running).
 - `pm2 save` has been run, so `dump.pm2` holds all four apps with `autostart: true`.
 
 ---
