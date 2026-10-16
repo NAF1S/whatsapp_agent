@@ -8,10 +8,11 @@
 # Suggested use — add ONE line to your host boot script, after the chroot is up:
 #   /bin/sh /projects/HH-agent/scripts/boot-services.sh
 #
-# Why this exists: Redis was started by hand and is not covered by anything at boot. If
-# Redis is absent the whole pipeline stalls (the bridge and agent both need it), so the
-# stack comes back up in a silent, half-broken state: WhatsApp is connected but no message
-# is ever processed.
+# Why this exists: both Redis and crond were started by hand and are covered by nothing else
+# at boot. If Redis is absent the whole pipeline stalls (the bridge and agent both need it),
+# so the stack comes back up in a silent, half-broken state: WhatsApp is connected but no
+# message is ever processed. If crond is absent the nightly backup and log-rotation jobs never
+# fire, so the safety net is missing exactly when you would need it.
 #
 set -u
 
@@ -22,6 +23,13 @@ AGENT_URL=http://127.0.0.1:3000/health
 BRIDGE_URL=http://127.0.0.1:3001/qr
 
 log() { printf '[boot-services] %s\n' "$*"; }
+
+# Match on the process NAME, not the command line: `ps | grep crond` also matches any shell
+# that merely mentions crond in its arguments, which reports a dead crond as running.
+cron_running() {
+  pidof crond >/dev/null 2>&1 && return 0
+  ps -eo comm 2>/dev/null | grep -qx 'crond'
+}
 
 # Redis password, shared by the agent and the bridge (REDIS_PASSWORD in either env file).
 # Exported so redis-cli calls in this script authenticate automatically.
@@ -88,7 +96,29 @@ else
   fi
 fi
 
-# ------------------------------------------------------------- 2. PM2 apps
+# ------------------------------------------------------------------ 2. cron
+# Nothing else starts crond: there is no init system in this chroot (inittab points at
+# /sbin/openrc, which does not exist). Without it the nightly jobs installed in
+# /etc/periodic/daily — hh-agent-backup and hh-agent-logrotate — silently never run. They
+# went missing this way for a full day, so the backup safety net was not actually there.
+CROND=$(command -v crond 2>/dev/null || echo /usr/sbin/crond)
+if cron_running; then
+  log "crond already running."
+elif [ -x "$CROND" ]; then
+  log "crond not running — starting it (nightly backup + log rotation depend on it)."
+  # -L: this chroot has no syslog, so crond's own output would otherwise be discarded.
+  "$CROND" -b -L /var/log/crond.log
+  sleep 1
+  if cron_running; then
+    log "crond is up."
+  else
+    log "ERROR: crond did not start — nightly backups will NOT run."
+  fi
+else
+  log "ERROR: crond not found at $CROND — nightly backups will NOT run."
+fi
+
+# ------------------------------------------------------------- 3. PM2 apps
 if ! command -v pm2 >/dev/null 2>&1; then
   log "ERROR: pm2 not found on PATH."
   exit 1
@@ -123,7 +153,7 @@ ensure_app hh-agent
 ensure_app whatsapp-bridge
 pm2 save >/dev/null 2>&1 || true
 
-# --------------------------------------------------------- 3. Verify it works
+# --------------------------------------------------------- 4. Verify it works
 i=0
 while [ "$i" -lt 30 ]; do
   agent_ok=0
@@ -139,6 +169,7 @@ status=0
 if [ "${agent_ok:-0}" -eq 1 ]; then log "Agent HTTP health: OK"; else log "ERROR: Agent not healthy at $AGENT_URL"; status=1; fi
 if [ "${bridge_ok:-0}" -eq 1 ]; then log "WhatsApp bridge: OK"; else log "ERROR: bridge not responding at $BRIDGE_URL"; status=1; fi
 if redis-cli ping >/dev/null 2>&1; then log "Redis: OK"; else log "ERROR: Redis not responding"; status=1; fi
+if cron_running; then log "cron: OK"; else log "ERROR: cron not running — nightly backups will NOT run"; status=1; fi
 
 if [ "$status" -eq 0 ]; then
   log "All services are up."
