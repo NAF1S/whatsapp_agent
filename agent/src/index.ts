@@ -10,9 +10,18 @@ import { sessionManager } from './session/manager';
 import { ragIndexer } from './rag/indexer';
 import { settingsService } from './data/settings';
 import { escalationNotifier } from './escalation/notifier';
+import { messengerWebhookRouter } from './channels/messenger/webhook';
 
 const app = express();
 app.use(cors());
+
+// ⚠️ ORDER IS LOAD-BEARING — this must be mounted BEFORE the global JSON parser below.
+// The Messenger webhook verifies Meta's HMAC signature over the *raw* request bytes. If
+// express.json() runs first it consumes the body, express.raw() inside that router then
+// skips (body-parser marks req._body), and every signature check fails. Do not move this
+// line below `express.json()`.
+app.use('/api/webhook/messenger', messengerWebhookRouter);
+
 app.use(express.json({ limit: '15mb' }));
 
 // 1. Static Dashboard files

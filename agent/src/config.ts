@@ -68,4 +68,16 @@ export const config = {
     humanHandoffTimeoutMinutes: parseInt(process.env.HUMAN_HANDOFF_TIMEOUT_MINUTES || '30', 10),
     logLevel: process.env.LOG_LEVEL || 'info',
   },
+  // Facebook Messenger (second channel). Deliberately NOT required(): the WhatsApp path is
+  // live and must keep booting while this channel is still being set up. An empty block just
+  // means the Messenger webhook answers 503 and nothing else changes. Unlike the secrets
+  // above these can never be hardcoded defaults — see isMessengerConfigured() for the
+  // all-or-nothing check the webhook uses.
+  messenger: {
+    pageId: process.env.MESSENGER_PAGE_ID || '',
+    pageAccessToken: process.env.MESSENGER_PAGE_ACCESS_TOKEN || '',
+    appSecret: process.env.MESSENGER_APP_SECRET || '',
+    verifyToken: process.env.MESSENGER_VERIFY_TOKEN || '',
+    graphVersion: process.env.MESSENGER_GRAPH_VERSION || 'v26.0',
+  },
 };

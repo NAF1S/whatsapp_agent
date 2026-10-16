@@ -3,6 +3,12 @@ import { deepseek } from '../brain/deepseek';
 import { logger } from '../utils/logger';
 
 export interface IncomingRawPayload {
+  /**
+   * Which channel this message arrived on. Optional and defaulted to 'whatsapp' so every
+   * existing producer keeps working untouched — the WhatsApp bridge does not set it, and the
+   * worker treats an absent value as WhatsApp.
+   */
+  channel?: 'whatsapp' | 'messenger';
   sessionId: string;
   senderPhone: string;
   messageType: 'text' | 'audio' | 'image' | 'video' | 'unknown';
