@@ -20,6 +20,10 @@ process.env.MESSENGER_PAGE_ID = '1234567890';
 process.env.MESSENGER_APP_SECRET = 'test-app-secret';
 process.env.MESSENGER_PAGE_ACCESS_TOKEN = 'test-page-token';
 process.env.MESSENGER_VERIFY_TOKEN = 'test-verify-token';
+// Critical: without this the router would enqueue its synthetic fixtures into the LIVE queue
+// and the real worker would try to reply to a fake PSID. The flag is also the production kill
+// switch for the channel.
+process.env.MESSENGER_ENQUEUE = 'false';
 
 const http = require('http');
 const crypto = require('crypto');
@@ -162,11 +166,21 @@ const server = app.listen(PORT, '127.0.0.1', async () => {
     check('rejects unprefixed header', verifyWebhookSignature(buf, 'abc123', APP_SECRET) === false);
 
     console.log('\n— identity —');
-    check('whatsapp key is unchanged', normalizeCustomerId('8801892740307') === '8801892740307');
+    check('canonical 13-digit is unchanged', normalizeCustomerId('8801892740307') === '8801892740307');
+    check('leading + is stripped', normalizeCustomerId('+880 1892-740307') === '8801892740307');
+    check('local 01… becomes 88…', normalizeCustomerId('01892740307') === '8801892740307');
     check(
-      'whatsapp key normalises same as before',
-      normalizeCustomerId('+880 1892-740307') === '+8801892740307',
+      'all three written forms converge on ONE key',
+      new Set([
+        normalizeCustomerId('8801892740307'),
+        normalizeCustomerId('+8801892740307'),
+        normalizeCustomerId('01892740307'),
+      ]).size === 1,
     );
+    // The guard that stops the 01… rule firing on a WhatsApp LID: a 15-digit LID that started
+    // with 01 must not be rewritten into something that looks like a subscriber number.
+    check('15-digit LID is left alone', normalizeCustomerId('105316893089913') === '105316893089913');
+    check('an LID is never rewritten to 88…', !normalizeCustomerId('105316893089913').startsWith('88'));
     check(
       'messenger psid keeps its prefix',
       normalizeCustomerId('fb:105316893089913') === 'fb:105316893089913',
@@ -178,6 +192,23 @@ const server = app.listen(PORT, '127.0.0.1', async () => {
     check(
       'messengerCustomerId builds the key',
       messengerCustomerId('105316893089913') === 'fb:105316893089913',
+    );
+    check('the phone rule never applies to a psid', normalizeCustomerId('fb:01892740307') === 'fb:01892740307');
+
+    console.log('\n— channel dispatch (the routing decision) —');
+    const { channelOf, toMessengerPsid } = require(path.join(AGENT_DIR, 'dist', 'channels', 'dispatch.js'));
+    check('messenger key routes to messenger', channelOf('fb:105316893089913') === 'messenger');
+    check('whatsapp JID routes to whatsapp', channelOf('8801892740307@s.whatsapp.net') === 'whatsapp');
+    check('bare phone routes to whatsapp', channelOf('8801892740307') === 'whatsapp');
+    check('admin JID routes to whatsapp', channelOf('8801892740307@s.whatsapp.net') === 'whatsapp');
+    check('LID JID routes to whatsapp', channelOf('105316893089913@lid') === 'whatsapp');
+    check('psid strips the prefix', toMessengerPsid('fb:105316893089913') === '105316893089913');
+    // The regression that matters: a WhatsApp recipient must never be misrouted.
+    check(
+      'no whatsapp id is ever mistaken for messenger',
+      ['8801892740307', '+8801892740307', '8801892740307@s.whatsapp.net', '105316893089913@lid'].every(
+        (id) => channelOf(id) === 'whatsapp',
+      ),
     );
 
     console.log('\n— parsing —');

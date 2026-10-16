@@ -1,6 +1,7 @@
 import { query } from '../data/db';
 import { config } from '../config';
 import { logger } from '../utils/logger';
+import { normalizeCustomerId } from '../channels/messenger/identity';
 
 export interface Session {
   phone: string;
@@ -25,7 +26,7 @@ export class SessionManager {
    * Auto-releases human handoff lock if timeout has elapsed.
    */
   async getOrCreateSession(phone: string, customerName?: string): Promise<Session> {
-    const cleanPhone = phone.replace(/[^\d+]/g, '');
+    const cleanPhone = normalizeCustomerId(phone);
 
     const existing = await query<any>(
       'SELECT phone, customer_name, is_human_controlled, human_agent_id, handoff_reason, handoff_at, last_message_at, metadata FROM sessions WHERE phone = $1',
@@ -101,7 +102,7 @@ export class SessionManager {
     content: string,
     metadata: Record<string, any> = {}
   ): Promise<void> {
-    const cleanPhone = phone.replace(/[^\d+]/g, '');
+    const cleanPhone = normalizeCustomerId(phone);
     await query(
       `INSERT INTO messages (phone, role, content, metadata, created_at)
        VALUES ($1, $2, $3, $4, NOW())`,
@@ -113,7 +114,7 @@ export class SessionManager {
    * Get recent messages for Gemini prompt context (ordered oldest to newest)
    */
   async getRecentMessages(phone: string, limit: number = 8): Promise<ChatMessage[]> {
-    const cleanPhone = phone.replace(/[^\d+]/g, '');
+    const cleanPhone = normalizeCustomerId(phone);
     const res = await query<any>(
       `SELECT role, content, created_at 
        FROM messages 
@@ -134,7 +135,7 @@ export class SessionManager {
    * Lock session for human agent handoff
    */
   async lockForHuman(phone: string, reason: string): Promise<void> {
-    const cleanPhone = phone.replace(/[^\d+]/g, '');
+    const cleanPhone = normalizeCustomerId(phone);
     await query(
       `UPDATE sessions 
        SET is_human_controlled = true, handoff_reason = $2, handoff_at = NOW(), last_message_at = NOW() 
@@ -148,7 +149,7 @@ export class SessionManager {
    * Unlock session back to automated AI bot
    */
   async unlockSession(phone: string): Promise<void> {
-    const cleanPhone = phone.replace(/[^\d+]/g, '');
+    const cleanPhone = normalizeCustomerId(phone);
     await query(
       `UPDATE sessions 
        SET is_human_controlled = false, handoff_reason = NULL, handoff_at = NULL, last_message_at = NOW() 
@@ -164,7 +165,7 @@ export class SessionManager {
    * was created" — an admin actively handling a chat never gets cut off mid-conversation.
    */
   async refreshHandoff(phone: string): Promise<void> {
-    const cleanPhone = phone.replace(/[^\d+]/g, '');
+    const cleanPhone = normalizeCustomerId(phone);
     await query(
       `UPDATE sessions
        SET handoff_at = NOW(), last_message_at = NOW()
@@ -177,7 +178,7 @@ export class SessionManager {
    * Update pending order data in session metadata
    */
   async updateSessionMetadata(phone: string, metadata: Record<string, any>): Promise<void> {
-    const cleanPhone = phone.replace(/[^\d+]/g, '');
+    const cleanPhone = normalizeCustomerId(phone);
     await query(
       `UPDATE sessions 
        SET metadata = metadata || $2::jsonb, last_message_at = NOW() 

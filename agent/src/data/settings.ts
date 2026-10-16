@@ -1,16 +1,18 @@
 import { query } from './db';
 import { config } from '../config';
 import { logger } from '../utils/logger';
+import { toCanonicalPhone } from '../utils/phone';
 
-export function normalizePhoneNumber(rawPhone: string): string {
-  if (!rawPhone) return '';
-  let cleaned = rawPhone.replace(/[^\d]/g, '');
-  // If Bangladesh local mobile (e.g. 01892740307 - 11 digits starting with 01)
-  if (cleaned.startsWith('01') && cleaned.length === 11) {
-    cleaned = '88' + cleaned;
-  }
-  return cleaned;
-}
+/**
+ * Kept under its original name so existing callers (`setAdminPhone` below, and
+ * `escalation/notifier.ts`) are untouched. The implementation moved to `utils/phone.ts` so the
+ * customer-identity path can share the exact same rule without importing this module's
+ * database dependency.
+ *
+ * Note this is an `import` + `const`, not `export … from`: the latter would re-export the name
+ * for other modules but leave it undefined inside this one.
+ */
+export const normalizePhoneNumber = toCanonicalPhone;
 
 export class SettingsService {
   async getSetting(key: string, defaultValue: string = ''): Promise<string> {
