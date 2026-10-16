@@ -1,0 +1,32 @@
+{
+  "name": "hh-customer-support-agent",
+  "version": "2.0.0",
+  "description": "Production-grade WhatsApp AI Customer Support Agent for Hide Haven",
+  "main": "dist/index.js",
+  "scripts": {
+    "build": "tsc",
+    "start": "node dist/index.js",
+    "dev": "ts-node src/index.ts",
+    "sync:faq": "ts-node scripts/seed-faq.ts",
+    "sync:products": "ts-node scripts/sync-products.ts"
+  },
+  "dependencies": {
+    "axios": "^1.7.9",
+    "bullmq": "^5.41.0",
+    "cors": "^2.8.5",
+    "dotenv": "^16.4.7",
+    "express": "^4.21.2",
+    "ioredis": "^5.5.0",
+    "pg": "^8.13.3",
+    "pino": "^9.6.0",
+    "pino-pretty": "^13.0.0"
+  },
+  "devDependencies": {
+    "@types/cors": "^2.8.17",
+    "@types/express": "^5.0.0",
+    "@types/node": "^22.13.8",
+    "@types/pg": "^8.11.11",
+    "ts-node": "^10.9.2",
+    "typescript": "^5.7.3"
+  }
+}

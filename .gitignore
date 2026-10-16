@@ -1,0 +1,96 @@
+# Environment Variables
+.env
+.env.local
+.env.*.local
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+MANIFEST
+.pytest_cache/
+.coverage
+
+# Virtual Environment
+venv/
+env/
+ENV/
+.venv
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+
+# Node.js
+node_modules/
+whatsapp_bridge/auth_info/
+whatsapp_bridge/*.log
+*/dist/
+
+# Application
+logs/
+conversation_logs/
+*.log
+*.log.*
+
+# OS
+.DS_Store
+Thumbs.db
+.DS_Store?
+.AppleDouble
+.LSOverride
+
+# Optional npm cache
+.npm
+
+# Local development
+local_config.json
+debug/
+
+# Redis snapshot (contains customer message PII)
+*.rdb
+
+# ── Legacy Python implementation ────────────────────────────────────────────
+# Superseded by the TypeScript agent under agent/. Kept on disk for reference but
+# deliberately not part of the deployed system, so it is not published.
+/app/
+/tests/
+/requirements.txt
+/test_*.py
+/setup.sh
+/setup.bat
+/start_all.bat
+/start_all.ps1
+/.env.example
+/BUILD_MANIFEST.json
+/IMPLEMENTATION_NOTES.md
+/QUICKSTART.md
+/WhatsApp Customer Support Agent Architecture.md
+/data/product_data.csv
+/data/*.bak.json
+
+# ── Local AI-tooling config (machine-specific) ──────────────────────────────
+.agents/
+.mcp.json
+skills-lock.json
