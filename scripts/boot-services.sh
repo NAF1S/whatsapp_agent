@@ -5,6 +5,11 @@
 # Safe to run repeatedly (at boot, or by hand any time). It starts only what is missing,
 # so it will not duplicate processes that your host boot script already started.
 #
+# ⚠️ STANDBY MODE (2026-10-17). The live agent now runs on EC2, so this host deliberately
+# does NOT start hh-agent / whatsapp-bridge on its own. Redis and cron still start. Which
+# apps may auto-start is controlled by /etc/hh-agent/autostart; use scripts/start-agent.sh
+# to bring them up by hand. See the "3a. Autostart policy" section below.
+#
 # Suggested use — add ONE line to your host boot script, after the chroot is up:
 #   /bin/sh /projects/HH-agent/scripts/boot-services.sh
 #
@@ -124,10 +129,40 @@ if ! command -v pm2 >/dev/null 2>&1; then
   exit 1
 fi
 
+# ------------------------------------------------------- 3a. Autostart policy
+# ⚠️ THIS HOST IS A STANDBY. The live agent runs on the EC2 box. Starting the two agent apps
+# here as well would mean a second WhatsApp session and a second queue worker attached to the
+# same customer traffic — duplicate replies, and potentially duplicate orders.
+#
+# So they are started ONLY when their name is explicitly listed in the policy file. An absent
+# or empty file is the safe default: start neither. Redis and cron above still start either
+# way — they are cheap, and cron keeps the nightly backup running.
+#
+#   /etc/hh-agent/autostart     one app name per line, '#' for comments
+#   sh scripts/start-agent.sh   start the two apps by hand, right now
+#
+# ⚠️ Do not `pm2 save` while the apps are running here: the dump is what `pm2 resurrect`
+# replays at boot, so saving re-arms autostart. `start-agent.sh` deliberately does not save.
+AUTOSTART_FILE=/etc/hh-agent/autostart
+app_autostarts() {
+  [ -f "$AUTOSTART_FILE" ] || return 1
+  grep -qx "$1" "$AUTOSTART_FILE" 2>/dev/null
+}
+
+want_agent=0
+want_bridge=0
+app_autostarts hh-agent && want_agent=1
+app_autostarts whatsapp-bridge && want_bridge=1
+autostart_any=$((want_agent + want_bridge))
+
 # Restore the saved process list ONLY when PM2 does not already know about these apps.
 # Running resurrect unconditionally starts a SECOND copy of every app (e.g. hh-agent-1), and
 # two queue workers on the same queue mean duplicate replies and potentially duplicate orders.
-if pm2 describe hh-agent >/dev/null 2>&1 || pm2 describe whatsapp-bridge >/dev/null 2>&1; then
+# Skipped entirely when autostart is disabled: the dump exists to bring these two apps back,
+# and on this host they must not come back on their own.
+if [ "$autostart_any" -eq 0 ]; then
+  log "autostart is DISABLED ($AUTOSTART_FILE lists neither app) — not resurrecting."
+elif pm2 describe hh-agent >/dev/null 2>&1 || pm2 describe whatsapp-bridge >/dev/null 2>&1; then
   log "PM2 already knows these apps — not resurrecting (would create duplicates)."
 else
   log "PM2 has no agent processes — restoring the saved process list."
@@ -136,6 +171,10 @@ fi
 
 ensure_app() {
   app="$1"
+  if ! app_autostarts "$app"; then
+    log "$app: autostart disabled — not started (see $AUTOSTART_FILE)."
+    return 0
+  fi
   if pm2 describe "$app" 2>/dev/null | grep -q 'online'; then
     log "$app is online."
     return 0
@@ -151,28 +190,55 @@ ensure_app() {
 
 ensure_app hh-agent
 ensure_app whatsapp-bridge
-pm2 save >/dev/null 2>&1 || true
+
+# `pm2 save` records the CURRENT list into the dump. With autostart disabled the dump must
+# stay free of these two apps, otherwise `pm2 resurrect` would bring them back next boot.
+if [ "$autostart_any" -gt 0 ]; then
+  pm2 save >/dev/null 2>&1 || true
+else
+  log "pm2 save skipped — the saved process list stays agent-free."
+fi
 
 # --------------------------------------------------------- 4. Verify it works
-i=0
-while [ "$i" -lt 30 ]; do
-  agent_ok=0
-  bridge_ok=0
-  curl -fsS -m 4 "$AGENT_URL" >/dev/null 2>&1 && agent_ok=1
-  curl -fsS -m 4 "$BRIDGE_URL" >/dev/null 2>&1 && bridge_ok=1
-  [ "$agent_ok" -eq 1 ] && [ "$bridge_ok" -eq 1 ] && break
-  i=$((i + 1))
-  sleep 2
-done
+# Only the apps that were meant to start are required to answer. In standby mode the two
+# HTTP checks are skipped entirely rather than reported as failures.
+agent_ok=1
+bridge_ok=1
+if [ "$want_agent" -eq 1 ] || [ "$want_bridge" -eq 1 ]; then
+  i=0
+  while [ "$i" -lt 30 ]; do
+    agent_ok=1
+    bridge_ok=1
+    if [ "$want_agent" -eq 1 ]; then
+      agent_ok=0
+      curl -fsS -m 4 "$AGENT_URL" >/dev/null 2>&1 && agent_ok=1
+    fi
+    if [ "$want_bridge" -eq 1 ]; then
+      bridge_ok=0
+      curl -fsS -m 4 "$BRIDGE_URL" >/dev/null 2>&1 && bridge_ok=1
+    fi
+    [ "$agent_ok" -eq 1 ] && [ "$bridge_ok" -eq 1 ] && break
+    i=$((i + 1))
+    sleep 2
+  done
+fi
 
 status=0
-if [ "${agent_ok:-0}" -eq 1 ]; then log "Agent HTTP health: OK"; else log "ERROR: Agent not healthy at $AGENT_URL"; status=1; fi
-if [ "${bridge_ok:-0}" -eq 1 ]; then log "WhatsApp bridge: OK"; else log "ERROR: bridge not responding at $BRIDGE_URL"; status=1; fi
+if [ "$want_agent" -eq 1 ]; then
+  if [ "$agent_ok" -eq 1 ]; then log "Agent HTTP health: OK"; else log "ERROR: Agent not healthy at $AGENT_URL"; status=1; fi
+else
+  log "Agent: standby — not started (autostart disabled)."
+fi
+if [ "$want_bridge" -eq 1 ]; then
+  if [ "$bridge_ok" -eq 1 ]; then log "WhatsApp bridge: OK"; else log "ERROR: bridge not responding at $BRIDGE_URL"; status=1; fi
+else
+  log "WhatsApp bridge: standby — not started (autostart disabled)."
+fi
 if redis-cli ping >/dev/null 2>&1; then log "Redis: OK"; else log "ERROR: Redis not responding"; status=1; fi
 if cron_running; then log "cron: OK"; else log "ERROR: cron not running — nightly backups will NOT run"; status=1; fi
 
 if [ "$status" -eq 0 ]; then
-  log "All services are up."
+  log "All enabled services are up."
 else
   log "One or more services failed to start — check: pm2 logs"
 fi

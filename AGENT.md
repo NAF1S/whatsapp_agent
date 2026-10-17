@@ -102,18 +102,26 @@ is no testsuite for the live TypeScript agent (existing tests target the dead Py
 ## 5. Environment
 
 - Alpine Linux inside a **chroot**. `/sbin/openrc` **does not exist**, so `/etc/inittab`'s
-  `openrc` lines are no-ops. Boot is driven by the Android-side step
-  `chroot <root> /bin/sh /usr/local/bin/alpine-services.sh` — that script lives **inside this
-  chroot and is editable from in here**. It starts ttyd, cloudflared and `pm2 resurrect`
-  (which is how the two agent apps come back), and sets PATH/HOME explicitly because the boot
-  invocation supplies neither. `pm2 startup` cannot be used: PID 1 is Android's init.
+  `openrc` lines are no-ops. Boot is driven from Android by the Magisk hook
+  `/data/adb/service.d/99-alpine-server.sh`, whose last act is
+  `chroot /data/local/alpine /bin/sh /usr/local/bin/alpine-services.sh` — that second script
+  lives **inside this chroot and is editable from in here**, and the Magisk hook + its log
+  are likewise visible at `/proc/1/root/data/adb/service.d/99-alpine-server.sh` and
+  `/proc/1/root/data/local/alpine-boot.log`. It starts ttyd, cloudflared and `pm2 resurrect`,
+  and sets PATH/HOME explicitly because the boot invocation supplies neither. `pm2 startup`
+  cannot be used: PID 1 is Android's init.
 - Since 2026-10-16 it also calls, at the end:
   `sh /projects/HH-agent/scripts/boot-services.sh` — that brings up **Redis and crond**, which
-  nothing else starts, and re-verifies the apps. It runs *after* `pm2 resurrect` because it
-  issues pm2 commands and inspects those apps. Before this, both Redis and crond were started
-  **by hand** and would have been missing after any reboot (bot silently dead; nightly backups
-  silently not running).
-- `pm2 save` has been run, so `dump.pm2` holds all four apps with `autostart: true`.
+  nothing else starts, and re-verifies whatever it was asked to start. It runs *after*
+  `pm2 resurrect` because it issues pm2 commands and inspects those apps. Before this, both
+  Redis and crond were started **by hand** and would have been missing after any reboot (bot
+  silently dead; nightly backups silently not running).
+- **Since 2026-10-17 this host is a STANDBY** — the live agent runs on EC2. `dump.pm2` now
+  holds only `filebrowser` and `cloudflare-tunnel`, and `boot-services.sh` starts the two
+  agent apps only when their names are listed in `/etc/hh-agent/autostart` (currently empty).
+  Start them by hand with `sh scripts/start-agent.sh`; it deliberately does **not** run
+  `pm2 save`, so they stay off after the next reboot. `pm2 save` while they are running is
+  the one command that re-arms autostart.
 
 ---
 

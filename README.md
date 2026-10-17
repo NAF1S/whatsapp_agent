@@ -164,6 +164,10 @@ pm2 logs hh-agent
 pm2 restart hh-agent              # after a rebuild of dist/
 ```
 
+> **On this host the two app services are in standby (since 2026-10-17).** The live agent runs
+> on EC2. `boot-services.sh` starts only Redis and cron here; use `sh scripts/start-agent.sh`
+> to start the agent by hand — and stop EC2 first. See TROUBLESHOOTING.md §1.
+
 **First run:** the bridge prints a QR code (also shown at `/admin`). Scan it with the store's
 phone → WhatsApp → *Linked devices*. Credentials are then stored in
 `whatsapp_bridge/auth_info/` — that directory is the store's WhatsApp account. Back it up and
@@ -176,8 +180,9 @@ never delete it.
 > sh scripts/boot-services.sh
 > ```
 >
-> It is idempotent, starts Redis with the correct flags, makes sure the PM2 apps are running
-> without duplicating them, and verifies everything afterwards.
+> It is idempotent, starts Redis with the correct flags, starts the PM2 apps that
+> `/etc/hh-agent/autostart` allows (none on this standby host) without duplicating them, and
+> verifies everything afterwards.
 
 ---
 

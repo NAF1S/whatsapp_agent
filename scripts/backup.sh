@@ -5,16 +5,20 @@
 # git repository, no database dump, and no copy of the WhatsApp session — losing
 # whatsapp_bridge/auth_info means re-pairing the store's WhatsApp account by hand.
 #
-# Usage:
-#   /bin/sh /projects/HH-agent/scripts/backup.sh
-#   BACKUP_ROOT=/mnt/usb/hh-agent-backups /bin/sh /projects/HH-agent/scripts/backup.sh
+# Usage (run it from anywhere — it locates the repo from its own path):
+#   /bin/sh <repo>/scripts/backup.sh
+#   BACKUP_ROOT=/mnt/usb/hh-agent-backups /bin/sh <repo>/scripts/backup.sh
 #
 # Keep a copy OFF this machine (USB drive, another host, or cloud storage): a backup that
 # lives only on the box that dies is not a backup.
 #
 set -u
 
-SRC=/projects/HH-agent
+# Resolve the project root from this script's location instead of hardcoding a host path.
+# The repo lives at /projects/HH-agent on the home server and under
+# ~/projects/HH-agent/whatsapp_agent on EC2; this makes the same script correct on both.
+SCRIPT_DIR=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
+SRC=$(dirname "$SCRIPT_DIR")
 DEST_ROOT=${BACKUP_ROOT:-/backups/hh-agent}
 KEEP=${BACKUP_KEEP:-7}
 STAMP=$(date +%Y%m%d-%H%M%S)
