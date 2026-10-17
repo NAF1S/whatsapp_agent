@@ -29,13 +29,14 @@ log() { printf '[backup] %s\n' "$*"; }
 mkdir -p "$DEST" || { log "ERROR: cannot create $DEST"; exit 1; }
 
 # 1. Secrets, WhatsApp session and live data (what you cannot recreate from source)
+# The root .env only exists on the home server, so include it only when present — a missing
+# path makes tar exit non-zero and would report a false failure every night on EC2.
+CONFIG_ITEMS="whatsapp_bridge/auth_info agent/.env ecosystem.config.js data"
+[ -f "$SRC/.env" ] && CONFIG_ITEMS="$CONFIG_ITEMS .env"
+
 if tar -czf "$DEST/config-and-session.tar.gz" -C "$SRC" \
      --exclude='node_modules' \
-     whatsapp_bridge/auth_info \
-     agent/.env \
-     .env \
-     ecosystem.config.js \
-     data 2>/dev/null; then
+     $CONFIG_ITEMS 2>/dev/null; then
   log "Backed up WhatsApp session, env files and data."
 else
   log "WARN: config/session backup reported an error (partial archive kept)."
