@@ -82,14 +82,14 @@ export const TOOL_DECLARATIONS = [
   },
   {
     name: 'place_order',
-    description: 'Place an official live Cash on Delivery order in the WooCommerce store. Requires: Product name, Product ID (or SKU), recipient customer name, phone number, delivery address, and delivery area ("Inside Dhaka" 60 BDT or "Outside Dhaka" 100 BDT). Delivery is FREE when the product total is 2000 BDT or more. Set apply_new_customer_discount=true only when the customer asked for a discount and says they are a new customer.',
+    description: 'Place an official live Cash on Delivery order in the WooCommerce store. Requires: Product name, Product ID (or SKU), recipient customer name, delivery address, and delivery area ("Inside Dhaka" 60 BDT or "Outside Dhaka" 100 BDT). Ask for the phone number once; on WhatsApp it is optional — when the customer says to use the number they are messaging from, omit it and the system fills it in. Delivery is FREE when the product total is 2000 BDT or more. Set apply_new_customer_discount=true only when the customer asked for a discount and says they are a new customer.',
     parameters: {
       type: 'OBJECT',
       properties: {
         product_name: { type: 'STRING', description: 'Name of the product ordered' },
         product_id: { type: 'INTEGER', description: 'WooCommerce product ID (from search_products)' },
         customer_name: { type: 'STRING', description: 'Full name of recipient' },
-        phone: { type: 'STRING', description: 'Contact phone number' },
+        phone: { type: 'STRING', description: 'Contact phone number. Omit it when the customer says to use the WhatsApp number they are messaging from ("এই নম্বরেই", "same number") — the system fills it in automatically. Provide it only when delivery is to a different number.' },
         address: { type: 'STRING', description: 'Detailed delivery address (house, road, area, city)' },
         area: {
           type: 'STRING',
@@ -102,7 +102,7 @@ export const TOOL_DECLARATIONS = [
           description: 'Set true ONLY when the customer asked for a discount and identified as a new customer. The system verifies eligibility itself and silently skips the discount for repeat customers or orders above the coupon limit.',
         },
       },
-      required: ['product_name', 'customer_name', 'phone', 'address', 'area', 'item_price'],
+      required: ['product_name', 'customer_name', 'address', 'area', 'item_price'],
     },
   },
   {
@@ -432,7 +432,20 @@ export async function executeTool(
       const qty = Math.max(1, parseInt(args.quantity, 10) || 1);
       const quotedPrice = parseFloat(args.item_price) || 0;
       const customerName = String(args.customer_name || '').trim();
-      const customerPhoneInput = String(args.phone || '').trim();
+
+      // The customer is already messaging from a phone number, so asking for it again when
+      // they say "এই নম্বরেই" is friction. Fall back to the WhatsApp session number (a
+      // canonical digit key). A Messenger key is `fb:<psid>` and must NOT be used as a phone,
+      // so those callers still have to supply one.
+      // Accept only a plausible Bangladeshi number (01… or 8801…) so an unresolved 15-digit
+      // WhatsApp LID can never be written into a delivery order as if it were a phone.
+      const sessionPhone = /^(?:01\d{9}|8801\d{9})$/.test(customerPhone) ? customerPhone : '';
+      const rawPhoneArg = String(args.phone || '').trim();
+      const phoneIsPlaceholder =
+        rawPhoneArg === '' ||
+        /^(same(\s+number)?|this(\s+number)?|ei(\s+number)?|ehi|এই(\s*(নম্বর|নাম্বার)[েেই]*)?|একই(\s*(নম্বর|নাম্বার)[েেই]*)?|হ্যাঁ|yes|ok)$/i.test(rawPhoneArg);
+      const customerPhoneInput = phoneIsPlaceholder ? (sessionPhone || rawPhoneArg) : rawPhoneArg;
+
       const address = String(args.address || '').trim();
       const areaLower = String(args.area || '').toLowerCase().trim();
       const addrLower = address.toLowerCase();
@@ -445,7 +458,7 @@ export async function executeTool(
         return {
           success: false,
           error: 'incomplete_customer_details',
-          message: 'The order was NOT placed because recipient details are incomplete. Ask the customer for the missing item(s): full name, 11-digit mobile number, and full delivery address — then retry.',
+          message: 'The order was NOT placed because recipient details are incomplete. Ask the customer for the missing item(s): full name, 11-digit mobile number, full delivery address, and Inside/Outside Dhaka — then retry.',
         };
       }
 
