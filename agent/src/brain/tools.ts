@@ -5,6 +5,7 @@ import { escalationNotifier } from '../escalation/notifier';
 import { query } from '../data/db';
 import { logger } from '../utils/logger';
 import { sendImage } from '../channels/dispatch';
+import { toneDownEmojis } from '../utils/reply';
 
 export const TOOL_DECLARATIONS = [
   {
@@ -256,7 +257,8 @@ export async function executeTool(
         for (const prod of matchedProducts) {
           const prodImages = prod.urls.slice(0, 2);
           for (let i = 0; i < prodImages.length; i++) {
-            const caption = i === 0 ? `📸 ${prod.productName} — ${prod.price}` : '';
+            // No emoji anywhere the customer can see it, including image captions.
+            const caption = i === 0 ? toneDownEmojis(`${prod.productName} — ${prod.price}`) : '';
             sendQueue.push({ url: prodImages[i], caption });
           }
           if (sendQueue.length >= 4) break;
@@ -266,7 +268,7 @@ export async function executeTool(
         const validProvided = provided.filter((u: any) => typeof u === 'string' && u.startsWith('http'));
         sendQueue = validProvided.slice(0, 3).map((url: string, i: number) => ({
           url,
-          caption: i === 0 ? (args.caption || productName || '') : '',
+          caption: i === 0 ? toneDownEmojis(args.caption || productName || '') : '',
         }));
       }
 
