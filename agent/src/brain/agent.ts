@@ -6,6 +6,7 @@ import { sessionManager } from '../session/manager';
 import { escalationNotifier } from '../escalation/notifier';
 import { config } from '../config';
 import { logger } from '../utils/logger';
+import { stripSegmentTokens } from '../utils/reply';
 
 /**
  * Build the provider-neutral record of a model turn for the SHARED `contents` array.
@@ -329,8 +330,10 @@ export class AgentBrain {
       }
     }
 
-    // Persist assistant reply to database
-    await sessionManager.addMessage(customerPhone, 'assistant', finalReply);
+    // Persist assistant reply to database as one readable message. The `<<<MSG>>>` tokens are
+    // an outbound wire format only — replaying them as conversation history would teach the
+    // model to leak them into normal text.
+    await sessionManager.addMessage(customerPhone, 'assistant', stripSegmentTokens(finalReply));
 
     return finalReply;
   }

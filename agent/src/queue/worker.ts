@@ -6,6 +6,7 @@ import { config } from '../config';
 import { logger } from '../utils/logger';
 import { normalizeCustomerId } from '../channels/messenger/identity';
 import { sendMessage, channelOf } from '../channels/dispatch';
+import { splitMessageParts, PART_DELAY_MS } from '../utils/reply';
 
 // Per-customer sequential mutex to avoid race conditions and parallel replies
 const customerLocks = new Map<string, Promise<void>>();
@@ -79,8 +80,25 @@ export function startQueueWorker(): Worker {
         // whichever channel the message arrived from — decided from `sessionId`.
         if (reply) {
           const channel = channelOf(sessionId);
-          logger.info({ senderPhone, channel, replyLength: reply.length }, 'Sending reply to customer');
-          await sendMessage(sessionId, reply);
+          // The brain emits the greeting and the answer as separate bubbles separated by
+          // `<<<MSG>>>`. Send them one at a time, with a short gap, so the customer sees a
+          // natural sequence of small messages instead of one wall of text. The per-customer
+          // mutex above is held for the whole loop, so another job cannot interleave.
+          const parts = splitMessageParts(reply);
+          logger.info(
+            { senderPhone, channel, replyLength: reply.length, parts: parts.length },
+            'Sending reply to customer'
+          );
+          for (let i = 0; i < parts.length; i++) {
+            const sent = await sendMessage(sessionId, parts[i]);
+            if (!sent) {
+              logger.error({ senderPhone, part: i + 1, of: parts.length }, 'A reply part failed to send; stopping the sequence');
+              break;
+            }
+            if (i < parts.length - 1) {
+              await new Promise((resolve) => setTimeout(resolve, PART_DELAY_MS));
+            }
+          }
         } else {
           logger.info({ senderPhone }, 'No automated reply sent (session in human control)');
         }

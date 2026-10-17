@@ -145,6 +145,14 @@ is no testsuite for the live TypeScript agent (existing tests target the dead Py
 | Ops | `boot-services.sh`, `healthcheck.sh`, `backup.sh`, nightly backup + log rotation cron, `pm2 save`, file modes tightened. |
 | Policy | 2-year warranty + free delivery over 2000 BDT added to the prompt, the FAQ (24 docs) and `place_order` (free delivery is actually applied). New-customer coupon `comeback10` documented and applied to orders; the coupon had **expired** on 2026-10-11 and was re-dated to 2030-12-31 in WooCommerce. |
 
+### 2026-10-17 — catalog lookup and message format
+
+| Area | Change |
+|---|---|
+| Catalog search | **"Dot moving belt" was reported unavailable while in stock.** The old `searchProducts` returned the vector results whenever it got 2+ rows and only fell back to keywords below that — with Gemini's compressed similarity scores the 0.50 threshold matches almost the whole catalog, so the keyword path never ran and the exact product could be crowded out by five near-matches. Rewritten as a real hybrid: vector recall at 0.35 + per-**word** ILIKE recall + one combined relevance score (whole-phrase bonus, token coverage, similarity, combo penalty). See `agent/src/rag/retriever.ts`. |
+| Messaging | Replies are now split into 2–4 short bubbles. The prompt tells the model to separate them with `<<<MSG>>>`; `agent/src/utils/reply.ts` splits, caps at 4, sentence-splits long unsplit text, and applies a deterministic emoji guard (sentimental emojis removed, max one emoji per bubble). The worker sends each part with a 700 ms gap under the existing per-customer mutex. Conversation history is stored **without** the token. |
+| Tone | Prompt now requires a salam + Sir/Ma'am greeting as its own first message of a conversation, then one idea per bubble, and forbids sentimental emojis (❤️ 😍 🥰 🙏 …) and over-familiar language. |
+
 ### ⚠️ NOT yet done — these need the owner
 
 1. **WhatsApp re-pairing.** On 2026-10-15 at 21:36 a transient 503 wiped
@@ -233,7 +241,8 @@ agent/src/brain/tools.ts       the 6 tools; place_order safety lives here
 agent/src/brain/prompt.ts      system prompt + catalog + stock/order rules
 agent/src/brain/deepseek.ts    primary provider (+ formatMessages id reconciliation)
 agent/src/brain/gemini.ts      fallback provider, vision, transcription, embeddings
-agent/src/queue/worker.ts      BullMQ worker, per-customer mutex, outbound send
+agent/src/queue/worker.ts      BullMQ worker, per-customer mutex, multi-bubble outbound send
+agent/src/utils/reply.ts       split `<<<MSG>>>` replies into bubbles + emoji tone guard
 agent/src/session/manager.ts   sessions, human-handoff lock + expiry
 agent/src/rag/indexer.ts       product/document indexing + stale-product pruning
 agent/src/preprocessor/        media → text
