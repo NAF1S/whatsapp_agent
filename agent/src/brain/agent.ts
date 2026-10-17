@@ -6,7 +6,7 @@ import { sessionManager } from '../session/manager';
 import { escalationNotifier } from '../escalation/notifier';
 import { config } from '../config';
 import { logger } from '../utils/logger';
-import { stripSegmentTokens } from '../utils/reply';
+import { stripSegmentTokens, toneDownEmojis } from '../utils/reply';
 
 /**
  * Build the provider-neutral record of a model turn for the SHARED `contents` array.
@@ -144,7 +144,9 @@ export class AgentBrain {
       } else if (msg.role === 'assistant') {
         contents.push({
           role: 'model',
-          parts: [{ text: msg.content }],
+          // Older replies in the history predate the no-emoji rule. Replaying them verbatim
+          // teaches the model to keep using emojis, so strip them from what the model sees.
+          parts: [{ text: toneDownEmojis(msg.content) }],
         });
       }
     }
