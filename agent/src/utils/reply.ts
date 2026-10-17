@@ -124,6 +124,18 @@ export function splitMessageParts(text: string): string[] {
     .map((part) => toneDownEmojis(part.trim()))
     .filter(Boolean);
 
+  // Models do not always obey the `<<<MSG>>>` instruction — observed live: one reply used
+  // the token, the next wrote the same shape as four newline-separated lines. Treat each
+  // non-empty line as its own bubble so the customer still gets small messages.
+  if (parts.length === 1) {
+    const lines = parts[0]
+      .split(/\n+/)
+      .map((line) => toneDownEmojis(line.trim()))
+      .filter(Boolean);
+    if (lines.length > 1) parts = lines;
+  }
+
+  // Last resort for one long paragraph: break it on sentence boundaries.
   if (parts.length === 1 && raw.length > FALLBACK_SPLIT_AT) {
     parts = splitSentences(parts[0]).map(toneDownEmojis).filter(Boolean);
   }
