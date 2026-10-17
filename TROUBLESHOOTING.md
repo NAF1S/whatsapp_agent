@@ -220,6 +220,14 @@ pm2 restart hh-agent         # ⚠️ briefly stops replies — prefer off-peak
 pm2 save
 ```
 
+⚠️ **If `agent/.env` changed** (a rotated secret, a new key), `pm2 restart` is not enough: PM2
+caches each app's environment and `dotenv` never overrides a variable that is already set, so
+the old value silently survives. Re-create the app instead:
+
+```sh
+pm2 delete hh-agent && pm2 start ecosystem.config.js --only hh-agent && pm2 save
+```
+
 Verify:
 
 ```sh
